@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>taat created by whale crop ltd</title>
+    <!-- Include Poppins font for modern title -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #3c652e; /* Color from reference */
+      }
+      canvas {
+        display: block;
+        background: #3c652e;
+        cursor: pointer;
+      }
+      #gameHeader {
+        position: absolute;
+        top: 10px;
+        width: 100%;
+        margin: 0;
+        text-align: center;
+        font-family: "Poppins", sans-serif;
+        font-size: 3.5em;
+        font-weight: 700;
+        background: linear-gradient(to right, #a1c4fd, #c2e9fb);
+        background-clip: text;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        z-index: 10;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 id="gameHeader">taat created by whale crop ltd</h1>
+    <canvas id="gameCanvas"></canvas>
+    <script>
+      // --- Canvas Setup ---
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingEnabled = false;
+      function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      window.addEventListener("resize", resizeCanvas);
+      resizeCanvas();
+      // Character selection overlay flag
+      let showSelection = true;
+
+      // Draw character selection screen
+      function drawSelectionScreen() {
+        ctx.fillStyle = "rgba(0,0,0,0.7)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "24px Arial";
+        ctx.fillText(
+          "Choose Your Character",
+          canvas.width / 2 - 150,
+          canvas.height / 2 - 100
+        );
+        characters.forEach((char, index) => {
+          const yPos = canvas.height / 2 + index * 50;
+          ctx.fillText(
+            `${char.name} (${char.nickname})`,
+            canvas.width / 2 - 150,
+            yPos
+          );
+        });
+        ctx.font = "16px Arial";
+        ctx.fillText(
+          "Click a character to start",
+          canvas.width / 2 - 150,
+          canvas.height / 2 + 150
+        );
+      }
+
+      // --- Globals and Utilities ---
+      let particles = []; // <-- FIX: Declare particles array
+      const characterScale = 6; // <-- FIX: Global character scale for consistency
+      const isoAngle = Math.PI / 6;
+      const tileW = 40,
+        tileH = 20;
+      const isoCos = tileW * Math.cos(isoAngle);
+      const isoSin = tileH * Math.sin(isoAngle);
+
+      function worldToScreenPoint(x, y) {
+        const screenX = (x - (y - cameraY)) * isoCos + canvas.width / 2;
+        const screenY = (x + (y - cameraY)) * isoSin + canvas.height * 0.3;
+        return { x: screenX, y: screenY };
+      }
+
+      function screenToWorldPoint(screenX, screenY) {
+        const adjustedX = screenX - canvas.width / 2;
+        const adjustedY = screenY - canvas.height * 0.3;
+        const worldX = (adjustedX / isoCos + adjustedY / isoSin) / 2;
+        const worldY = adjustedY / isoSin - adjustedX / isoCos / 2 + cameraY;
+        return { x: worldX, y: worldY };
+      }
+
+      // --- Globals ---
+      let cameraY = 0,
+        snakes = [],
+        currentEnemy = null,
+        enemyKilled = true,
+        nextSpawnDistance = 15;
+      const pathStartX = 11,
+        pathEndX = 19;
+      const moveSpeed = 0.1;
+      let keysPressed = {};
+
+      const player = {
+        x: 15,
+        y: 15, // Player's world y position
+        type: "player",
+        characterScale: characterScale, // Use global characterScale
+        draw: drawTaats, // Assigning the draw function directly to the object
+        facing: "down", // 'down' (back) or 'up' (front)
+        // Image and physics properties for custom player
+        image: new Image(),
+        width: 50,
+        height: 50,
+        // Jump physics (vertical z-axis)
+        z: 0, // Vertical offset for jump
+        velocityZ: 0, // Vertical velocity
+        gravity: 0.5, // Gravity affecting vertical velocity
+        jumpStrength: -10, // Initial jump impulse
+        isJumping: false,
+      };
+      player.image.src = "revanth.png";
+
+      // Character options
+      // Updated character options
+      const characters = [
+        {
+          name: "Revanth Reddy",
+          nickname: "ఊసరవెల్లి",
+          imageSrc: "revanth.png",
+          quote: "కేసీఆర్ తాత... నీ ఫామ్ హౌస్ గేట్లు బద్దలు కొడతా.",
+        },
+        {
+          name: "KTR",
+          nickname: "Amul Baby",
+          imageSrc: "ktr.png",
+          quote: "What is this nonsense? I strongly condemn it.",
+        },
+        {
+          name: "Kishan Reddy",
+          nickname: "Kendra Nidhula Minister",
+          imageSrc: "kishan.png",
+          quote: '"కేంద్ర ప్రభుత్వం వేల కోట్లు నిధులు ఇచ్చింది',
+        },
+      ];
+
+      // Dynamic enemies based on non-chosen characters
+      let enemyCharacters = [];
+      function setEnemyCharacters(selected) {
+        enemyCharacters = characters.filter(
+          (char) => char.name !== selected.name
+        );
+      }
+
+      let selectedCharacter = characters[0];
+
+      // Add method to update player settings
+      player.updateFromCharacter = function (char) {
+        this.image = new Image();
+        this.image.src = char.imageSrc;
+        this.nickname = char.nickname;
+        this.quote = char.quote;
+      };
+
+      // Initialize player from selected character
+      player.updateFromCharacter(selectedCharacter);
+
+      // Name box object
+      const nameBox = {
+        text: player.nickname, // dynamic based on selection
+        width: 120,
+        height: 20,
+        color: "#ffffff",
+        textColor: "#000000",
+      };
+      // Use new draw function for player
+      player.draw = drawPlayer;
+      // Speech bubble state for character head
+      let speechBubble = { text: "", x: 0, y: 0, expires: 0 };
+
+      // --- Drawing Functions ---
+      function drawPixelArt(x, y, pixelData, pixelSize) {
+        for (let r = 0; r < pixelData.length; r++) {
+          for (let c = 0; c < pixelData[r].length; c++) {
+            if (pixelData[r][c]) {
+              ctx.fillStyle = pixelData[r][c];
+              ctx.fillRect(
+                Math.floor(x + c * pixelSize),
+                Math.floor(y + r * pixelSize),
+                pixelSize,
+                pixelSize
+              );
+            }
+          }
+        }
+      }
+
+      function drawNewStylizedTree(x, y, hasApples = true) {
+        const { x: isoX, y: isoY } = worldToScreenPoint(x, y);
+        // Trunk
+        ctx.save();
+        ctx.globalAlpha = 0.95;
+        ctx.fillStyle = "#5e3c2b";
+        ctx.fillRect(isoX - 6, isoY - 32, 12, 32);
+        ctx.fillStyle = "#8a614e";
+        ctx.fillRect(isoX - 4, isoY - 32, 8, 32);
+        // Shadow
+        ctx.globalAlpha = 0.25;
+        ctx.beginPath();
+        ctx.ellipse(isoX, isoY, 18, 7, 0, 0, Math.PI * 2);
+        ctx.fillStyle = "#222";
+        ctx.fill();
+        ctx.globalAlpha = 0.95;
+        // Foliage (layered, rounded)
+        const foliageColors = ["#2f512a", "#3f6d35", "#5a994e", "#7fd86a"];
+        const foliageLayers = [
+          { r: 26, dx: 0, dy: -44, color: foliageColors[0] },
+          { r: 22, dx: 12, dy: -58, color: foliageColors[1] },
+          { r: 20, dx: -14, dy: -54, color: foliageColors[2] },
+          { r: 18, dx: 0, dy: -68, color: foliageColors[3] },
+          { r: 14, dx: 10, dy: -74, color: foliageColors[2] },
+          { r: 12, dx: -10, dy: -76, color: foliageColors[1] },
+        ];
+        foliageLayers.forEach((l) => {
+          ctx.beginPath();
+          ctx.arc(isoX + l.dx, isoY + l.dy, l.r, 0, Math.PI * 2);
+          ctx.fillStyle = l.color;
+          ctx.fill();
+        });
+        // Apples (if apple tree)
+        if (hasApples) {
+          const appleColor = "#e33131",
+            appleHighlight = "#ff7e7e";
+          const applePositions = [
+            [18, -60],
+            [-5, -78],
+            [-25, -60],
+            [5, -65],
+            [0, -50],
+            [12, -75],
+            [-12, -70],
+          ];
+          applePositions.forEach(([ax, ay]) => {
+            ctx.fillStyle = appleColor;
+            ctx.beginPath();
+            ctx.arc(isoX + ax, isoY + ay, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = appleHighlight;
+            ctx.beginPath();
+            ctx.arc(isoX + ax - 2, isoY + ay - 2, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+        ctx.restore();
+      }
+
+      function drawWorld() {
+        const corners = [
+          screenToWorldPoint(0, 0),
+          screenToWorldPoint(canvas.width, 0),
+          screenToWorldPoint(0, canvas.height),
+          screenToWorldPoint(canvas.width, canvas.height),
+        ];
+        const worldMinX = Math.min(...corners.map((c) => c.x)),
+          worldMaxX = Math.max(...corners.map((c) => c.x));
+        const worldMinY = Math.min(...corners.map((c) => c.y)),
+          worldMaxY = Math.max(...corners.map((c) => c.y));
+        const buffer = 3;
+
+        for (
+          let y = Math.floor(worldMinY - buffer);
+          y < Math.ceil(worldMaxY + buffer);
+          y++
+        ) {
+          for (
+            let x = Math.floor(worldMinX - buffer);
+            x < Math.ceil(worldMaxX + buffer);
+            x++
+          ) {
+            const { x: isoX, y: isoY } = worldToScreenPoint(x, y);
+            if (
+              isoX < -tileW ||
+              isoX > canvas.width + tileW ||
+              isoY < -tileH ||
+              isoY > canvas.height + tileH * 4
+            )
+              continue;
+            let color =
+              x >= pathStartX && x <= pathEndX ? "#92c864" : "#639c3e"; // Colors from reference
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(isoX, isoY);
+            const p1 = worldToScreenPoint(x + 1, y);
+            ctx.lineTo(p1.x, p1.y);
+            const p2 = worldToScreenPoint(x + 1, y + 1);
+            ctx.lineTo(p2.x, p2.y);
+            const p3 = worldToScreenPoint(x, y + 1);
+            ctx.lineTo(p3.x, p3.y);
+            ctx.closePath();
+            ctx.fill();
+
+            // Draw trees at regular intervals on grass (not on path)
+            if ((x < pathStartX || x > pathEndX) && (x + y) % 7 === 0) {
+              drawNewStylizedTree(x + 0.5, y + 0.5);
+            }
+          }
+        }
+      }
+
+      function drawTaats() {
+        const { x, y } = worldToScreenPoint(this.x, this.y);
+        let sprite;
+        if (this.facing === "down") {
+          // Back view (moving up/forward)
+          sprite = [
+            [0, 0, "#F8E45C", "#F8E45C", 0, 0],
+            [0, "#F8E45C", "#F8E45C", "#F8E45C", "#F8E45C", 0],
+            ["#F8E45C", "#111", "#F8E45C", "#111", "#F8E45C", "#F8E45C"],
+            ["#F8E45C", "#F8E45C", "#111", "#111", "#F8E45C", "#F8E45C"],
+            [0, "#F8E45C", "#E4B42C", "#E4B42C", "#F8E45C", 0],
+            [0, 0, "#E4B42C", "#E4B42C", 0, 0],
+          ];
+        } else {
+          // Front view (moving down/backward)
+          sprite = [
+            [0, 0, "#F8E45C", "#F8E45C", 0, 0],
+            [0, "#F8E45C", "#F8E45C", "#F8E45C", "#F8E45C", 0],
+            ["#F8E45C", "#111", "#F8E45C", "#111", "#F8E45C", "#F8E45C"],
+            ["#F8E45C", "#F8E45C", "#111", "#111", "#F8E45C", "#F8E45C"],
+            [0, "#F8E45C", "#E4B42C", "#E4B42C", "#F8E45C", 0],
+            [0, 0, "#E4B42C", "#E4B42C", 0, 0],
+            // Add a simple "face" for front view
+            [0, 0, "#111", "#111", 0, 0],
+          ];
+        }
+        drawPixelArt(
+          x - this.characterScale * 3,
+          y - this.characterScale * 7,
+          sprite,
+          this.characterScale
+        );
+      }
+      // Draw player using custom image and name box
+      function drawPlayer() {
+        const { x, y } = worldToScreenPoint(player.x, player.y);
+        const yWithJump = y + player.z;
+        ctx.drawImage(
+          player.image,
+          x - player.width / 2,
+          yWithJump - player.height,
+          player.width,
+          player.height
+        );
+        drawNameBox(yWithJump);
+      }
+
+      // Draw name box fixed at top center
+      function drawNameBox() {
+        const boxX = canvas.width / 2 - nameBox.width / 2;
+        const boxY = 20; // top padding
+        ctx.fillStyle = nameBox.color;
+        ctx.fillRect(boxX, boxY, nameBox.width, nameBox.height);
+        ctx.fillStyle = nameBox.textColor;
+        ctx.font = "12px Arial";
+        ctx.fillText(nameBox.text, boxX + 10, boxY + 15);
+      }
+
+      // Draw speech bubble above character head
+      function drawSpeechBubble() {
+        if (!speechBubble.text || Date.now() > speechBubble.expires) return;
+        const { x: sx, y: sy } = worldToScreenPoint(
+          speechBubble.x,
+          speechBubble.y
+        );
+        const padding = 10;
+        ctx.font = "12px Arial";
+        const textWidth = ctx.measureText(speechBubble.text).width;
+        const bubbleW = textWidth + padding * 2;
+        const bubbleH = 30;
+        const bx = sx - bubbleW / 2;
+        const by = sy - player.height - bubbleH - 15;
+
+        // Draw bubble background
+        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.strokeStyle = "#333";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bubbleW, bubbleH, 10);
+        ctx.fill();
+        ctx.stroke();
+
+        // Draw speech tail
+        ctx.fillStyle = "rgba(255, 255, 255, 0.9)";
+        ctx.beginPath();
+        ctx.moveTo(sx - 5, by + bubbleH);
+        ctx.lineTo(sx, sy - player.height - 5);
+        ctx.lineTo(sx + 5, by + bubbleH);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Draw text
+        ctx.fillStyle = "#333";
+        ctx.fillText(speechBubble.text, bx + padding, by + bubbleH / 2 + 4);
+      }
+
+      // --- Game Entities ---
+      class Snake {
+        constructor(x, y, vx, vy, targetX, targetY) {
+          this.x = x;
+          this.y = y;
+          this.vx = vx;
+          this.vy = vy;
+          this.targetX = targetX;
+          this.targetY = targetY;
+          this.type = "snake";
+          this.alive = true;
+          this.opacity = 1.0;
+          this.phase = "fly";
+          this.fallSpeed = 0.05;
+          this.segmentCount = 8;
+          this.segmentLength = 0.6;
+          this.segments = [];
+          for (let i = 0; i < this.segmentCount; i++) {
+            this.segments.push({ x: this.x, y: this.y });
+          }
+        }
+        update() {
+          if (!this.alive) return;
+          if (this.phase === "fly") {
+            this.x += this.vx;
+            this.y += this.vy;
+            if (
+              Math.hypot(this.x - this.targetX, this.y - this.targetY) < 1.0
+            ) {
+              this.phase = "fall";
+            }
+          } else if (this.phase === "fall") {
+            this.y += this.fallSpeed;
+            this.opacity -= 0.025;
+            if (Math.random() < 0.5)
+              particles.push({ x: this.x, y: this.y, life: 1 });
+            if (this.opacity <= 0) this.alive = false;
+          }
+          this.segments[0] = { x: this.x, y: this.y };
+          for (let i = 1; i < this.segmentCount; i++) {
+            const leader = this.segments[i - 1],
+              current = this.segments[i];
+            const dx = leader.x - current.x,
+              dy = leader.y - current.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > this.segmentLength) {
+              current.x += (dx / dist) * (dist - this.segmentLength);
+              current.y += (dy / dist) * (dist - this.segmentLength);
+            }
+          }
+        }
+        draw() {
+          ctx.save();
+          ctx.globalAlpha = this.opacity;
+          const shakeX = (Math.random() - 0.5) * 2;
+          for (let i = 0; i < this.segments.length - 1; i++) {
+            const { x: x1, y: y1 } = worldToScreenPoint(
+              this.segments[i].x,
+              this.segments[i].y
+            );
+            const { x: x2, y: y2 } = worldToScreenPoint(
+              this.segments[i + 1].x,
+              this.segments[i + 1].y
+            );
+            ctx.strokeStyle = "#40d850";
+            ctx.lineWidth = 10;
+            ctx.lineCap = "round";
+            ctx.beginPath();
+            ctx.moveTo(x1 + shakeX, y1);
+            ctx.lineTo(x2 + shakeX, y2);
+            ctx.stroke();
+          }
+          const head = this.segments[0],
+            neck = this.segments[1];
+          const { x: hx, y: hy } = worldToScreenPoint(head.x, head.y);
+          const { x: nx, y: ny } = worldToScreenPoint(neck.x, neck.y);
+          const angle = Math.atan2(hy - ny, hx - nx);
+          ctx.translate(hx, hy);
+          ctx.rotate(angle);
+          ctx.fillStyle = "#90ff80";
+          ctx.beginPath();
+          ctx.moveTo(8, 0);
+          ctx.lineTo(-6, -6);
+          ctx.lineTo(-6, 6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = "#111";
+          ctx.fillRect(0, -4, 3, 3);
+          ctx.fillRect(0, 1, 3, 3);
+          ctx.restore();
+        }
+      }
+
+      // Enemy class using non-selected characters with dynamic images and quotes
+      class Enemy {
+        constructor(worldY) {
+          this.x = pathStartX + Math.random() * (pathEndX - pathStartX);
+          this.y = worldY;
+          this.alive = true;
+          this.type = "enemy";
+          this.radius = characterScale * 3;
+          // Randomly pick from enemyCharacters
+          this.charData =
+            enemyCharacters[Math.floor(Math.random() * enemyCharacters.length)];
+          this.image = new Image();
+          this.image.src = this.charData.imageSrc;
+          this.nickname = this.charData.nickname;
+          this.quote = this.charData.quote;
+        }
+        draw() {
+          const { x, y } = worldToScreenPoint(this.x, this.y);
+          // Draw enemy image
+          ctx.drawImage(
+            this.image,
+            x - player.width / 2,
+            y - player.height,
+            player.width,
+            player.height
+          );
+          // Draw nickname box above enemy
+          const enemyBoxX = x - nameBox.width / 2;
+          const enemyBoxY = y - player.height - nameBox.height - 5;
+          ctx.fillStyle = nameBox.color;
+          ctx.fillRect(enemyBoxX, enemyBoxY, nameBox.width, nameBox.height);
+          ctx.fillStyle = nameBox.textColor;
+          ctx.font = "12px Arial";
+          ctx.fillText(this.nickname, enemyBoxX + 10, enemyBoxY + 15);
+        }
+      }
+
+      function updateAndDrawParticles() {
+        for (let i = particles.length - 1; i >= 0; i--) {
+          const p = particles[i];
+          p.life -= 0.02;
+          if (p.life <= 0) {
+            particles.splice(i, 1);
+            continue;
+          }
+          const { x, y } = worldToScreenPoint(p.x, p.y);
+          ctx.fillStyle = `rgba(100,255,120,${p.life})`;
+          ctx.globalAlpha = p.life;
+          ctx.fillRect(x, y, 3, 3);
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      // --- Logic ---
+      function updatePlayerMovement() {
+        let movedVertically = false;
+        if (keysPressed["ArrowUp"] || keysPressed["w"]) {
+          player.y -= moveSpeed;
+          player.facing = "down"; // Face downward (back view) when moving up
+          movedVertically = true;
+        }
+        if (keysPressed["ArrowDown"] || keysPressed["s"]) {
+          player.y += moveSpeed;
+          player.facing = "up"; // Face upward (front view) when moving down
+          movedVertically = true;
+        }
+        if (keysPressed["ArrowLeft"] || keysPressed["a"]) {
+          player.x = Math.max(pathStartX, player.x - moveSpeed);
+        }
+        // Mario-like jumping and gravity on Spacebar (separate z-axis)
+        if ((keysPressed[" "] || keysPressed["Space"]) && !player.isJumping) {
+          player.velocityZ = player.jumpStrength;
+          player.isJumping = true;
+        }
+        player.velocityZ += player.gravity;
+        player.z += player.velocityZ;
+        // Ground level check for z-axis
+        if (player.z >= 0) {
+          player.z = 0;
+          player.velocityZ = 0;
+          player.isJumping = false;
+        }
+        if (keysPressed["ArrowRight"] || keysPressed["d"]) {
+          player.x = Math.min(pathEndX, player.x + moveSpeed);
+        }
+      }
+
+      function checkSpawnEnemy() {
+        if (enemyKilled) {
+          currentEnemy = new Enemy(player.y - 20);
+          enemyKilled = false;
+        }
+      }
+
+      // FIXED: Z-SORTING AND RENDERING ORDER
+      function gameLoop() {
+        if (showSelection) {
+          drawSelectionScreen();
+          return;
+        }
+        updatePlayerMovement();
+        // Camera follows player.y
+        cameraY = player.y;
+        checkSpawnEnemy();
+        snakes.forEach((s) => s.update());
+        snakes = snakes.filter((s) => s.alive);
+        snakes.forEach((s) => {
+          if (
+            currentEnemy &&
+            currentEnemy.alive &&
+            s.alive &&
+            s.phase === "fly"
+          ) {
+            if (Math.hypot(s.x - currentEnemy.x, s.y - currentEnemy.y) < 2.0) {
+              s.alive = false;
+              currentEnemy.alive = false;
+              // Show enemy quote in speech bubble
+              speechBubble = {
+                text: currentEnemy.quote,
+                x: currentEnemy.x,
+                y: currentEnemy.y,
+                expires: Date.now() + 3000,
+              };
+              currentEnemy = null;
+              enemyKilled = true;
+            }
+          }
+        });
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Respect showSelection flag
+        if (showSelection) {
+          drawSelectionScreen();
+          return;
+        }
+
+        // Z-SORTING
+        const drawables = [...snakes];
+        if (currentEnemy) drawables.push(currentEnemy);
+        // Player's world_y for z-sorting
+        player.world_y = player.y;
+        drawables.push(player);
+        // Sort by world_y if present, else y
+        drawables.sort(
+          (a, b) =>
+            (a.world_y !== undefined ? a.world_y : a.y) -
+            (b.world_y !== undefined ? b.world_y : b.y)
+        );
+
+        drawWorld();
+        updateAndDrawParticles();
+        // Draw fixed-position name box
+        drawNameBox();
+
+        // Draw dynamic objects in their sorted order
+        drawables.forEach((obj) => obj.draw());
+
+        // Draw speech bubble after characters
+        drawSpeechBubble();
+
+        requestAnimationFrame(gameLoop);
+      }
+
+      // Selection click handler
+      canvas.addEventListener("click", function selectionClick(e) {
+        if (!showSelection) return;
+        const rect = canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+        characters.forEach((char, index) => {
+          const yPos = canvas.height / 2 + index * 50 - 24;
+          const textWidth = ctx.measureText(
+            `${char.name} (${char.nickname})`
+          ).width;
+          if (
+            mouseX >= canvas.width / 2 - 150 &&
+            mouseX <= canvas.width / 2 - 150 + textWidth &&
+            mouseY >= canvas.height / 2 + index * 50 - 24 &&
+            mouseY <= canvas.height / 2 + index * 50
+          ) {
+            selectedCharacter = char;
+            player.updateFromCharacter(char);
+            nameBox.text = char.nickname;
+            // Set enemies to non-chosen characters
+            setEnemyCharacters(char);
+            showSelection = false;
+            // Hide page header after selection
+            document.getElementById("gameHeader").style.display = "none";
+            canvas.removeEventListener("click", selectionClick);
+            gameLoop();
+            // --- Input ---
+            canvas.addEventListener("click", (e) => {
+              if (showSelection) return;
+              const rect = canvas.getBoundingClientRect();
+              const mouseX = e.clientX - rect.left,
+                mouseY = e.clientY - rect.top;
+              // Check if click on top center name box
+              const topBoxX = canvas.width / 2 - nameBox.width / 2;
+              const topBoxY = 20;
+              if (
+                mouseX >= topBoxX &&
+                mouseX <= topBoxX + nameBox.width &&
+                mouseY >= topBoxY &&
+                mouseY <= topBoxY + nameBox.height
+              ) {
+                speechBubble = {
+                  text: player.quote,
+                  x: player.x,
+                  y: player.y,
+                  expires: Date.now() + 3000,
+                };
+                return;
+              }
+              const target = screenToWorldPoint(mouseX, mouseY);
+              const taatsWorldY = player.y;
+              const dx = target.x - player.x,
+                dy = target.y - taatsWorldY;
+              const dist = Math.hypot(dx, dy) || 1;
+              const speed = 0.4;
+              const vx = (dx / dist) * speed,
+                vy = (dy / dist) * speed;
+              snakes.push(
+                new Snake(player.x, taatsWorldY, vx, vy, target.x, target.y)
+              );
+            });
+          }
+        });
+      });
+
+      window.addEventListener("keydown", (e) => {
+        keysPressed[e.key] = true;
+      });
+      window.addEventListener("keyup", (e) => {
+        keysPressed[e.key] = false;
+      });
+
+      // --- Run ---
+      gameLoop();
+    </script>
+  </body>
+</html>
