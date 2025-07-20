@@ -4,7 +4,7 @@ An isometric throw game featuring Telugu political characters with speech bubble
 
 ## 🎮 Play the Game
 
-**[Play TAAT Game Online](https://socialistco4.github.io/Taat-Game-By-Whale-Corp-Ltd/)**
+**[Play TAAT Game Online](https://socialistico4.github.io/Taat-Game-By-Whale-Corp-Ltd/)**
 
 ## 🎯 Game Features
 
